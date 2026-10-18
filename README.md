@@ -1,8 +1,8 @@
-# snowflake-dbt-native
+# dbt-snowflake-native
 
 dbt를 Snowflake 안에서 실행하는 방식(dbt Projects on Snowflake)을 Snowflake CLI로 시험한 프로젝트다.
 소스의 유일한 원천은 이 GitLab 저장소이고, `snow dbt deploy`가 체크아웃된 파일을 Snowflake로 올린다.
-CI 파드에서 dbt를 직접 실행하는 `snowflake-dbt` 프로젝트와 같은 모델로 비교했다.
+CI 파드에서 dbt를 직접 실행하는 `dbt-snowflake-ci` 프로젝트와 같은 모델로 비교했다.
 
 ## 구성 한눈에
 
@@ -28,7 +28,7 @@ GitLab 저장소 ── snow dbt deploy ──▶ dbt 프로젝트 객체 (DBT_D
 ## 저장소 구조
 
 ```
-snowflake-dbt-native/
+dbt-snowflake-native/
 ├── dbt/                          Snowflake로 올라가는 부분 (배포 대상은 이 디렉토리뿐)
 │   ├── dbt_project.yml
 │   ├── dbt_projects_profiles.yml
@@ -47,7 +47,7 @@ snowflake-dbt-native/
 
 | 경로 | 내용 |
 |---|---|
-| `dbt/` | dbt 프로젝트. `snowflake-dbt`와 같은 모델이다. `snow dbt deploy --source dbt`가 이 디렉토리만 올린다 |
+| `dbt/` | dbt 프로젝트. `dbt-snowflake-ci`와 같은 모델이다. `snow dbt deploy --source dbt`가 이 디렉토리만 올린다 |
 | `dbt/dbt_projects_profiles.yml` | Snowflake 안에서 쓰는 프로필. `profiles.yml`보다 우선한다. 계정 정보와 비밀번호가 없다 |
 | `setup/01-native-setup.sql` | 프로젝트 객체를 둘 스키마와 최초 생성 권한 |
 | `setup/02-native-ownership.sql` | 관리자가 처음 배포한 프로젝트 객체의 소유권을 `DBT_APP`에 넘긴다 |
@@ -61,7 +61,7 @@ snowflake-dbt-native/
 
 ### Snowflake
 
-`snowflake-dbt` 프로젝트의 `setup/01-dbt-setup.sql`(롤, 웨어하우스, DB, 서비스 계정)이 먼저 적용되어 있어야 한다. 이어서 Snowsight에서 `ACCOUNTADMIN`으로 `setup/01-native-setup.sql`을 실행한다.
+`dbt-snowflake-ci` 프로젝트의 `setup/01-dbt-setup.sql`(롤, 웨어하우스, DB, 서비스 계정)이 먼저 적용되어 있어야 한다. 이어서 Snowsight에서 `ACCOUNTADMIN`으로 `setup/01-native-setup.sql`을 실행한다.
 
 ```sql
 USE ROLE ACCOUNTADMIN;
@@ -217,7 +217,7 @@ CI 변수 설정은 이렇다.
 | `snow dbt deploy` (파일 9개 업로드, 자동 컴파일 포함) | 약 22초 |
 | `snow dbt execute ... build` (dbt 실행 자체는 약 6.7초) | 약 21초 |
 
-`snowflake-dbt`의 파이프라인(68초)과 작업량이 다르다. 그쪽은 개발과 운영 두 환경에서 `run`과 `test`를 하고, 이쪽은 한 환경에서 배포와 `build`를 한다.
+`dbt-snowflake-ci`의 파이프라인(68초)과 작업량이 다르다. 그쪽은 개발과 운영 두 환경에서 `run`과 `test`를 하고, 이쪽은 한 환경에서 배포와 `build`를 한다.
 
 ## 5. 시험 결과
 
@@ -252,7 +252,7 @@ CI 변수 설정은 이렇다.
 
 ## 8. Python 방식과 비교
 
-`snowflake-dbt`(dbt-core를 CI 파드에서 실행)와 이 프로젝트(dbt 프로젝트 객체를 Snowflake 안에서 실행)를 같은 모델로 비교했다. 목표는 "dbt 결과 객체를 사용자가 Snowsight에서 쿼리로 바꾸지 못하게 하고, 변경은 배포한 프로젝트를 통해서만 한다"는 통제다.
+`dbt-snowflake-ci`(dbt-core를 CI 파드에서 실행)와 이 프로젝트(dbt 프로젝트 객체를 Snowflake 안에서 실행)를 같은 모델로 비교했다. 목표는 "dbt 결과 객체를 사용자가 Snowsight에서 쿼리로 바꾸지 못하게 하고, 변경은 배포한 프로젝트를 통해서만 한다"는 통제다.
 
 ### 가장 큰 차이
 

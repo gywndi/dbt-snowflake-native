@@ -1,5 +1,5 @@
 -- Snowflake 안에서 dbt를 실행하기 위한 준비. 관리자 연결(ACCOUNTADMIN)로 한 번 실행한다.
--- snowflake-dbt 프로젝트의 setup/01-dbt-setup.sql(롤·웨어하우스·DB)을 먼저 실행해 둔 상태를 전제로 한다.
+-- dbt-snowflake-ci 프로젝트의 setup/01-dbt-setup.sql(롤·웨어하우스·DB)을 먼저 실행해 둔 상태를 전제로 한다.
 
 USE ROLE ACCOUNTADMIN;
 
