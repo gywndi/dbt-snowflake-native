@@ -176,7 +176,16 @@ SHOW GRANTS TO ROLE DBT_APP;
 | 배포 | `snow dbt deploy ... --source dbt --git-commit "$CI_COMMIT_SHA" --git-branch "$CI_COMMIT_REF_NAME"`. 어느 커밋이 배포됐는지 객체에 남는다 |
 | 실행 | `snow dbt execute <연결 옵션> snowflake_dbt_native build` |
 
-CI는 아직 한 번도 실행하지 않았다. 첫 실행 결과는 "확인하지 않은 것"에서 갱신한다.
+2026-10-18에 수동으로 실행해 성공했다(총 69초, `Done. PASS=15`). 단계별 시간은 다음과 같다.
+
+| 단계 | 시간 |
+|---|---|
+| 파드 시작 | 약 4초 |
+| `pip install snowflake-cli` | 약 19.5초 |
+| `snow dbt deploy` (파일 9개 업로드, 자동 컴파일 포함) | 약 22초 |
+| `snow dbt execute ... build` (dbt 실행 자체는 약 6.7초) | 약 21초 |
+
+`snowflake-dbt`의 파이프라인(68초)과 작업량이 다르다. 그쪽은 개발과 운영 두 환경에서 `run`과 `test`를 하고, 이쪽은 한 환경에서 배포와 `build`를 한다.
 
 ## 5. 시험 결과
 
@@ -203,14 +212,14 @@ CI는 아직 한 번도 실행하지 않았다. 첫 실행 결과는 "확인하�
 
 - 지원하는 dbt 버전 목록과 제한 사항, `--dbt-version`으로 올렸을 때의 동작, 배포 옵션이 기존 객체에 바뀌어 적용되는지.
 - `TASK` 스케줄, 환경 분리(`env.yml`), Slim CI, 실행 이력 모니터링 설정, 실패 알림.
-- GitLab CI 작업의 실제 실행 결과(`pip install snowflake-cli` 시간, 임시 연결이 컨테이너에서 동작하는지). 인증 방식은 PAT, OIDC도 검토 대상이다. 지금은 비밀번호 인증이다.
+- CI 인증 방식. 지금은 비밀번호이고 PAT, OIDC도 검토 대상이다.
 - 증분 모델의 두 번째 실행 결과.
 - 위 "시험하지 않은 최소 권한 구성"에 적은 네 가지.
 - 일부 기능에 필요한 `live` 버전 객체 조건(`2026_06` 동작 변경 번들).
 
 ## 8. 다음 단계
 
-1. `snowflake_native` 수동 작업을 한 번 실행해서 CI에서의 동작과 소요 시간을 확인한다.
+1. 배포 시간을 줄인다. `--no-auto-compile`(배포 중 컴파일 약 14초)과 CLI가 미리 설치된 이미지(설치 약 19.5초)를 시험한다.
 2. 배포 롤과 실행 롤을 분리하고 `--no-auto-compile`을 시험한다.
 3. `TASK`로 주기 실행하고 모니터링을 켠다.
 4. 인증을 비밀번호에서 PAT나 OIDC, 키페어로 바꾼다.
