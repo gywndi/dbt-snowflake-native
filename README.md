@@ -139,7 +139,8 @@ snow dbt execute -c dbt_app snowflake_dbt_native build
 | 대상 | 권한 | 용도 |
 |---|---|---|
 | 웨어하우스 `DBT_WH` | `USAGE` | 컴파일과 모델 실행 |
-| 데이터베이스 `DBT_DEV` | `USAGE`, `CREATE SCHEMA` | 모델 결과 스키마(`NATIVE_TEST`)를 dbt가 만든다 |
+| 데이터베이스 `DBT_DEV` | `USAGE` | 데이터베이스를 연다. `CREATE SCHEMA`는 필요 없다 |
+| 스키마 `DBT_DEV.NATIVE_TEST` | `USAGE`, `CREATE VIEW`, `CREATE TABLE`, `CREATE DYNAMIC TABLE` | 모델 결과 스키마. 관리자가 미리 만들고, 권한은 `FUTURE SCHEMAS` grant로 자동 부여된다 |
 | 스키마 `DBT_DEV.NATIVE` | `USAGE` | 프로젝트 객체가 있는 스키마를 연다 |
 | 프로젝트 객체 | `OWNERSHIP` | 배포(live 버전 교체)와 실행 |
 | `SNOWFLAKE_SAMPLE_DATA` | `IMPORTED PRIVILEGES` | 공유 DB 읽기 |
@@ -171,7 +172,34 @@ GRANT OWNERSHIP ON DBT PROJECT DBT_DEV.NATIVE.SNOWFLAKE_DBT_NATIVE TO ROLE DBT_A
 |---|---|
 | 배포 롤과 실행 롤 분리 | 배포 롤은 객체 `OWNERSHIP`만 갖고, 실행 롤은 객체 `USAGE`와 데이터 권한을 갖는다. 산출물을 읽는 롤에는 `MONITOR`도 준다 |
 | 컴파일 단계 분리 | `--no-auto-compile`로 배포 시 컴파일을 건너뛰면 배포 롤이 데이터 접근 권한을 가질 필요가 없다 |
-| 결과 스키마를 미리 만들기 | `DBT_DEV`의 `CREATE SCHEMA` 대신 스키마를 관리자가 만들고 `DBT_APP`에는 객체 생성 권한만 준다 |
+
+### 결과 스키마는 미리 만든다
+
+**결과 스키마를 관리자가 미리 만들어 두면 `DBT_APP`에 `CREATE SCHEMA`가 필요 없다.** dbt는 실행 초기에 스키마 목록을 조회하고, 목록에 없는 스키마만 `CREATE SCHEMA IF NOT EXISTS`로 만든다. 스키마가 이미 있으면 그 호출이 생략된다.
+
+권한은 `FUTURE SCHEMAS` grant로 준다. 관리자가 스키마를 만드는 순간 `DBT_APP`의 권한이 자동으로 붙어서, 스키마를 새로 만들 때마다 `GRANT`를 따로 하지 않아도 된다.
+
+```sql
+USE ROLE ACCOUNTADMIN;
+
+-- 이미 있는 스키마에 적용한다
+GRANT USAGE ON ALL SCHEMAS IN DATABASE DBT_DEV TO ROLE DBT_APP;
+
+GRANT CREATE VIEW, CREATE TABLE, CREATE DYNAMIC TABLE ON ALL SCHEMAS IN DATABASE DBT_DEV TO ROLE DBT_APP;
+
+-- 앞으로 만드는 스키마에 자동으로 적용한다
+GRANT USAGE ON FUTURE SCHEMAS IN DATABASE DBT_DEV TO ROLE DBT_APP;
+
+GRANT CREATE VIEW, CREATE TABLE, CREATE DYNAMIC TABLE ON FUTURE SCHEMAS IN DATABASE DBT_DEV TO ROLE DBT_APP;
+
+-- 데이터베이스 수준 CREATE SCHEMA를 회수한다
+REVOKE CREATE SCHEMA ON DATABASE DBT_DEV FROM ROLE DBT_APP;
+```
+
+- **지켜야 할 것:** 모델이 쓰는 모든 스키마를 미리 만들어야 한다. `+schema`로 만들어지는 커스텀 스키마, seeds, snapshots, 테스트 실패 저장 스키마도 포함한다. 하나라도 빠지면 `CREATE SCHEMA` 권한 에러가 난다.
+- **`FUTURE` grant의 범위:** `DBT_DEV`의 모든 스키마에 적용되므로 `DBT_DEV.NATIVE`(프로젝트 객체 스키마)에도 객체 생성 권한이 생긴다. 결과 스키마를 고정해서 최소 권한을 더 엄격히 하려면 `ALL`/`FUTURE` 대신 `GRANT ... ON SCHEMA DBT_DEV.NATIVE_TEST`로 스키마를 지정한다.
+- **소유권:** 스키마는 관리자가 소유하고, 그 안의 객체는 `DBT_APP`이 소유한다. 재실행의 `create or replace`는 객체의 소유자가 `DBT_APP`이라 통과한다.
+- **스크립트:** `setup/05-native-schema-precreate.sql`(스키마 생성과 grant), `setup/06-native-revoke-create-schema.sql`(회수), `setup/07-native-negative-control.sql`(대조군)이다.
 
 실행 권한 모델도 알아둘 만하다. dbt는 프로필 `role`의 권한으로 실행되지만, 호출한 사용자가 가진 권한 범위 안으로 제한된다. 그래서 호출 계정과 프로필 롤이 모두 웨어하우스, 데이터베이스, 스키마, 모델이 참조하는 객체에 접근할 수 있어야 한다.
 
@@ -234,6 +262,10 @@ CI 변수 설정은 이렇다.
 | 다이내믹 테이블 갱신 모드 | `FULL`이다. 원천이 공유 DB라서 변경 추적을 켤 수 없어 증분 갱신이 안 된다 |
 | 실행 산출물 | 실행 롤이 `DBT_DEV.NATIVE`에 `dbt_project_output_stage_...` 스테이지를 소유한다 |
 | 태스크 실행 | `DBT_APP`이 소유한 태스크가 `EXECUTE DBT PROJECT ... build`를 수동 1회 실행해 성공했다(18초). 쿼리 이력의 실행 사용자는 `SYSTEM`, 롤은 `DBT_APP`이다. 사람이 `DBT_APP` 세션을 쓰지 않아도 Snowflake가 직접 실행한다 |
+| 결과 스키마 사전 생성 + `CREATE SCHEMA` 회수 | 2026-10-18. 관리자가 `NATIVE_TEST`를 만들고 `DBT_APP`의 `CREATE SCHEMA ON DATABASE DBT_DEV`를 회수한 뒤, 로컬 `build`가 통과했다(`PASS=15`) |
+| 같은 상태에서 GitLab CI | 통과했다. 기존 객체를 `create or replace`로 교체하고 증분 테이블에 병합하는 재실행도 성공했다. 스키마는 관리자 소유이고 객체는 `DBT_APP` 소유라도 문제없었다 |
+| 대조군(스키마 없음) | 결과 스키마를 지우고 `build`를 돌리면 `Insufficient privileges to operate on database 'DBT_DEV'. Your primary role DBT_APP must have CREATE SCHEMA granted on DATABASE DBT_DEV.`로 실패한다 |
+| `FUTURE SCHEMAS` grant | 관리자가 스키마를 만든 직후(16ms 이내) `DBT_APP`의 `USAGE`, `CREATE VIEW/TABLE/DYNAMIC TABLE`이 자동으로 붙었다. `build`가 통과했다(`PASS=15`) |
 
 ## 6. 알려진 이슈
 
