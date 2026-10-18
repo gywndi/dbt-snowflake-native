@@ -1,0 +1,12 @@
+# Snowflake 안에서 dbt를 실행할 때 쓰는 프로필. Snowflake 안에서 도는 실행이라 계정·비밀번호가 필요 없다.
+# 실행 권한은 아래 role의 권한으로 정해진다.
+snowflake_dbt_native:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      database: DBT_DEV
+      schema: NATIVE_TEST
+      role: DBT_APP
+      warehouse: DBT_WH
+      threads: 4

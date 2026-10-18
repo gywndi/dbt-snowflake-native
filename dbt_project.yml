@@ -1,0 +1,8 @@
+name: snowflake_dbt_native
+version: "1.0.0"
+config-version: 2
+profile: snowflake_dbt_native
+
+models:
+  snowflake_dbt_native:
+    +materialized: view
