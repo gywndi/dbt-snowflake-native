@@ -35,7 +35,7 @@ snowflake-dbt-native/
 │   └── models/
 ├── setup/                        Snowflake 쪽 준비 SQL (배포 대상 아님)
 │   ├── 01-native-setup.sql
-│   ├── 02-native-lockdown.sql
+│   ├── 02-native-ownership.sql
 │   ├── 03-native-task-grants.sql
 │   └── 04-native-task.sql
 ├── scripts/                      로컬 실행 스크립트 (배포 대상 아님)
@@ -50,7 +50,7 @@ snowflake-dbt-native/
 | `dbt/` | dbt 프로젝트. `snowflake-dbt`와 같은 모델이다. `snow dbt deploy --source dbt`가 이 디렉토리만 올린다 |
 | `dbt/dbt_projects_profiles.yml` | Snowflake 안에서 쓰는 프로필. `profiles.yml`보다 우선한다. 계정 정보와 비밀번호가 없다 |
 | `setup/01-native-setup.sql` | 프로젝트 객체를 둘 스키마와 최초 생성 권한 |
-| `setup/02-native-lockdown.sql` | 최초 배포 후 만들기 권한을 회수한다 |
+| `setup/02-native-ownership.sql` | 관리자가 처음 배포한 프로젝트 객체의 소유권을 `DBT_APP`에 넘긴다 |
 | `setup/03-native-task-grants.sql` | 태스크 실행에 필요한 권한(`CREATE TASK`, `EXECUTE TASK`). 관리자가 한 번 실행한다 |
 | `setup/04-native-task.sql` | 프로젝트를 실행하는 태스크를 만든다. `DBT_APP` 연결(CLI)로 실행한다 |
 | `scripts/add-connection.sh` | CLI 연결 `dbt_app`을 `~/.snowflake/connections.toml`에 만든다. 비밀번호는 숨김 입력 |
@@ -61,7 +61,7 @@ snowflake-dbt-native/
 
 ### Snowflake
 
-`snowflake-dbt` 프로젝트의 `setup/01-dbt-setup.sql`(롤, 웨어하우스, DB, `SVC_DBT`)이 먼저 적용되어 있어야 한다. 이어서 Snowsight에서 `ACCOUNTADMIN`으로 `setup/01-native-setup.sql`을 실행한다.
+`snowflake-dbt` 프로젝트의 `setup/01-dbt-setup.sql`(롤, 웨어하우스, DB, 서비스 계정)이 먼저 적용되어 있어야 한다. 이어서 Snowsight에서 `ACCOUNTADMIN`으로 `setup/01-native-setup.sql`을 실행한다.
 
 ```sql
 USE ROLE ACCOUNTADMIN;
@@ -69,10 +69,9 @@ USE ROLE ACCOUNTADMIN;
 CREATE SCHEMA IF NOT EXISTS DBT_DEV.NATIVE;
 
 GRANT USAGE ON SCHEMA DBT_DEV.NATIVE TO ROLE DBT_APP;
-GRANT CREATE DBT PROJECT ON SCHEMA DBT_DEV.NATIVE TO ROLE DBT_APP;
 ```
 
-`CREATE DBT PROJECT` 권한이 인식되지 않으면 이 계정에서 기능이 꺼져 있다는 뜻이다. 이 계정에서는 인식되었다.
+`DBT_APP`에는 `CREATE DBT PROJECT` 권한을 주지 않는다. 프로젝트 객체는 관리자가 처음 한 번 만들고 소유권만 넘긴다. 그 절차는 "3. 권한"에 있다.
 
 ### 로컬
 
@@ -90,6 +89,8 @@ snow --version
 ## 2. 배포와 실행
 
 ### 스크립트로 실행
+
+계정 식별자와 유저는 환경변수(`SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`)에서 읽는다. 없으면 스크립트가 물어본다. 비밀번호는 항상 숨김 입력으로 받는다.
 
 ```bash
 # 배포와 실행(build)을 한 번에 한다. 비밀번호를 물어본다
@@ -126,7 +127,7 @@ snow dbt execute -c dbt_app snowflake_dbt_native build
 | 원칙 | 적용 |
 |---|---|
 | 접속 계정은 사람이 아닌 서비스 계정 하나, 롤도 하나 | `SVC_DBT`에는 `DBT_APP`만 부여한다 |
-| 만들기 권한은 최초 1회만 준다 | `CREATE DBT PROJECT`는 객체를 만든 뒤 회수한다 |
+| 서비스 계정에 만들기 권한을 주지 않는다 | 프로젝트 객체는 관리자가 만들고 `OWNERSHIP`만 넘긴다. `CREATE DBT PROJECT`는 주지 않는다 |
 | 평소 배포는 객체의 소유권으로만 한다 | `OWNERSHIP`이 있으면 live 버전을 교체할 수 있다 |
 | 원천은 읽기만 한다 | 공유 DB는 `IMPORTED PRIVILEGES`만 준다 |
 | 관리자 권한은 사람이 Snowsight에서만 쓴다 | 자동화 계정에는 관리자 롤을 주지 않는다 |
@@ -140,23 +141,29 @@ snow dbt execute -c dbt_app snowflake_dbt_native build
 | 웨어하우스 `DBT_WH` | `USAGE` | 컴파일과 모델 실행 |
 | 데이터베이스 `DBT_DEV` | `USAGE`, `CREATE SCHEMA` | 모델 결과 스키마(`NATIVE_TEST`)를 dbt가 만든다 |
 | 스키마 `DBT_DEV.NATIVE` | `USAGE` | 프로젝트 객체가 있는 스키마를 연다 |
-| 스키마 `DBT_DEV.NATIVE` | `CREATE DBT PROJECT` | **최초 생성에만 필요하다** |
-| 프로젝트 객체 | `OWNERSHIP` (만든 롤이 자동으로 소유) | 이후 배포와 실행 |
+| 프로젝트 객체 | `OWNERSHIP` | 배포(live 버전 교체)와 실행 |
 | `SNOWFLAKE_SAMPLE_DATA` | `IMPORTED PRIVILEGES` | 공유 DB 읽기 |
 
-### 최초 생성 후 만들기 권한 회수
+### 프로젝트 객체를 만드는 방법
 
-최초 배포를 마친 뒤 `setup/02-native-lockdown.sql`을 `ACCOUNTADMIN`으로 실행한다.
+**관리자가 만들고 소유권만 넘기는 방식을 권장한다.** 서비스 계정에 만들기 권한을 줬다가 회수할 필요가 없다.
+
+1. 관리자 연결로 첫 배포를 한다. `ACCOUNTADMIN`이 `DBT_DEV.NATIVE` 스키마를 만든 롤이라 객체를 만들 수 있다.
+2. `setup/02-native-ownership.sql`로 소유권을 `DBT_APP`에 넘긴다.
+3. 이후 CI와 스크립트는 `DBT_APP`으로 `snow dbt deploy`를 `--force` 없이 실행한다. 소유권만으로 live 버전을 교체하고 실행한다.
 
 ```sql
 USE ROLE ACCOUNTADMIN;
 
-REVOKE CREATE DBT PROJECT ON SCHEMA DBT_DEV.NATIVE FROM ROLE DBT_APP;
-
-SHOW GRANTS TO ROLE DBT_APP;
+GRANT OWNERSHIP ON DBT PROJECT DBT_DEV.NATIVE.SNOWFLAKE_DBT_NATIVE TO ROLE DBT_APP COPY CURRENT GRANTS;
 ```
 
-회수한 뒤에도 같은 이름으로 재배포가 성공했다(`Successfully deployed new files to the live version.`). 그 상태에서 `DBT_APP`은 스키마 `USAGE`와 프로젝트 객체 `OWNERSHIP`만 가진다. 결과적으로 CI 계정은 새 프로젝트 객체를 마음대로 만들 수 없고, 승인된 객체의 내용만 갱신한다.
+확인한 것과 못 한 것을 구분한다.
+
+| 항목 | 상태 |
+|---|---|
+| 만들기 권한 없이 소유권만으로 같은 이름 재배포 | **확인함.** `DBT_APP`이 `CREATE DBT PROJECT`를 회수당한 상태에서 `Successfully deployed new files to the live version.`로 성공했다 |
+| 관리자 첫 배포와 소유권 이전(`GRANT OWNERSHIP ON DBT PROJECT`) | **확인하지 못함.** 문서를 근거로 쓴 절차다. 이 계정의 현재 객체는 `DBT_APP`이 직접 만든 것이다 |
 
 ### 문서에는 있지만 시험하지 않은 최소 권한 구성
 
@@ -165,7 +172,6 @@ SHOW GRANTS TO ROLE DBT_APP;
 | 배포 롤과 실행 롤 분리 | 배포 롤은 객체 `OWNERSHIP`만 갖고, 실행 롤은 객체 `USAGE`와 데이터 권한을 갖는다. 산출물을 읽는 롤에는 `MONITOR`도 준다 |
 | 컴파일 단계 분리 | `--no-auto-compile`로 배포 시 컴파일을 건너뛰면 배포 롤이 데이터 접근 권한을 가질 필요가 없다 |
 | 결과 스키마를 미리 만들기 | `DBT_DEV`의 `CREATE SCHEMA` 대신 스키마를 관리자가 만들고 `DBT_APP`에는 객체 생성 권한만 준다 |
-| 프로젝트 객체를 관리자가 만들고 소유권 이전 | 관리자가 최초 배포한 뒤 `OWNERSHIP`을 `DBT_APP`으로 넘긴다 |
 
 실행 권한 모델도 알아둘 만하다. dbt는 프로필 `role`의 권한으로 실행되지만, 호출한 사용자가 가진 권한 범위 안으로 제한된다. 그래서 호출 계정과 프로필 롤이 모두 웨어하우스, 데이터베이스, 스키마, 모델이 참조하는 객체에 접근할 수 있어야 한다.
 
@@ -183,12 +189,22 @@ SHOW GRANTS TO ROLE DBT_APP;
 - **`resource_group`:** 같은 객체에 배포가 겹치지 않게 한 번에 하나만 돈다.
 - **`timeout`:** 15분이다.
 
+CI 변수 설정은 이렇다.
+
+| 변수 | 값 | 설정 |
+|---|---|---|
+| `SNOWFLAKE_ACCOUNT` | `<org>-<account>` | Masked |
+| `SNOWFLAKE_USER` | 서비스 계정 이름 | Masked |
+| `SNOWFLAKE_PASSWORD` | 비밀번호 | Masked and hidden(저장 후 값을 다시 볼 수 없다) |
+
+프로젝트를 공개할 때는 `Settings > CI/CD > General pipelines`의 공개 파이프라인(Public pipelines)을 끈다. 켜 두면 작업 로그를 누구나 본다. 이 파이프라인은 MR에서 돌지 않고 `main`에서만 돌아서 `Protected`를 켜도 된다.
+
 2026-10-18 확인: `.gitlab-ci.yml`이 바뀐 푸시에서 작업이 자동으로 실행되어 성공했다(66초). README만 바꾼 푸시에서는 자동 실행 없이 수동 실행 버튼만 만들어지는지 이어서 확인한다.
 
 | 항목 | 내용 |
 |---|---|
 | 이미지 | `python:3.12-slim`. 작업 안에서 `pip install snowflake-cli`로 CLI를 설치한다 |
-| 인증 | 프로젝트 CI 변수 `SNOWFLAKE_PASSWORD`(Masked, Protected 끔)를 CLI가 환경변수로 읽는다. 계정과 유저는 파일에 직접 쓴다 |
+| 인증 | 프로젝트 CI 변수 `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD`를 CLI가 환경변수로 읽는다. 코드와 이력에는 값이 없다 |
 | 배포 | `snow dbt deploy ... --source dbt --git-commit "$CI_COMMIT_SHA" --git-branch "$CI_COMMIT_REF_NAME"`. 어느 커밋이 배포됐는지 객체에 남는다 |
 | 실행 | `snow dbt execute <연결 옵션> snowflake_dbt_native build` |
 
@@ -231,7 +247,7 @@ SHOW GRANTS TO ROLE DBT_APP;
 - `TASK`의 주기 실행(수동 1회만 확인했다), 환경 분리(`env.yml`), Slim CI, 실행 이력 모니터링 설정, 실패 알림.
 - CI 인증 방식. 지금은 비밀번호이고 PAT, OIDC도 검토 대상이다.
 - 증분 모델의 두 번째 실행 결과.
-- 위 "시험하지 않은 최소 권한 구성"에 적은 네 가지.
+- 위 "시험하지 않은 최소 권한 구성"에 적은 항목과, 관리자가 객체를 처음 만들고 소유권을 넘기는 절차.
 - 일부 기능에 필요한 `live` 버전 객체 조건(`2026_06` 동작 변경 번들).
 
 ## 8. Python 방식과 비교

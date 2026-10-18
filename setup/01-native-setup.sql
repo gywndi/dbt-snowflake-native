@@ -6,9 +6,9 @@ USE ROLE ACCOUNTADMIN;
 -- dbt 프로젝트 객체를 둘 스키마 (모델 결과가 들어가는 DBT_DEV.NATIVE_TEST와 분리)
 CREATE SCHEMA IF NOT EXISTS DBT_DEV.NATIVE;
 
--- DBT_APP이 이 스키마를 열고, 안에 dbt 프로젝트 객체를 만들 수 있게 한다
+-- DBT_APP이 이 스키마를 열 수 있게 한다. 프로젝트 객체를 만드는 CREATE DBT PROJECT 권한은 주지 않는다
+-- 객체는 관리자가 처음 한 번 배포하고, 소유권만 DBT_APP에 넘긴다 (02-native-ownership.sql)
 GRANT USAGE ON SCHEMA DBT_DEV.NATIVE TO ROLE DBT_APP;
-GRANT CREATE DBT PROJECT ON SCHEMA DBT_DEV.NATIVE TO ROLE DBT_APP;
 
 -- 확인
 SHOW GRANTS TO ROLE DBT_APP;
