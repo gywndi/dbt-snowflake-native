@@ -1,0 +1,10 @@
+-- DBT_APP의 DB 수준 CREATE SCHEMA를 회수한다. 관리자 연결(ACCOUNTADMIN)로 실행한다.
+-- 05-native-schema-precreate.sql 적용 후에 실행한다.
+
+USE ROLE ACCOUNTADMIN;
+
+-- 회수
+REVOKE CREATE SCHEMA ON DATABASE DBT_DEV FROM ROLE DBT_APP;
+
+-- 확인: DBT_DEV에 대한 CREATE SCHEMA 행이 없어야 한다
+SHOW GRANTS TO ROLE DBT_APP;
