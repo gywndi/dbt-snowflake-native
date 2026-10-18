@@ -35,7 +35,9 @@ snowflake-dbt-native/
 │   └── models/
 ├── setup/                        Snowflake 쪽 준비 SQL (배포 대상 아님)
 │   ├── 01-native-setup.sql
-│   └── 02-native-lockdown.sql
+│   ├── 02-native-lockdown.sql
+│   ├── 03-native-task-grants.sql
+│   └── 04-native-task.sql
 ├── scripts/                      로컬 실행 스크립트 (배포 대상 아님)
 │   ├── add-connection.sh
 │   └── run-native.sh
@@ -49,6 +51,8 @@ snowflake-dbt-native/
 | `dbt/dbt_projects_profiles.yml` | Snowflake 안에서 쓰는 프로필. `profiles.yml`보다 우선한다. 계정 정보와 비밀번호가 없다 |
 | `setup/01-native-setup.sql` | 프로젝트 객체를 둘 스키마와 최초 생성 권한 |
 | `setup/02-native-lockdown.sql` | 최초 배포 후 만들기 권한을 회수한다 |
+| `setup/03-native-task-grants.sql` | 태스크 실행에 필요한 권한(`CREATE TASK`, `EXECUTE TASK`). 관리자가 한 번 실행한다 |
+| `setup/04-native-task.sql` | 프로젝트를 실행하는 태스크를 만든다. `DBT_APP` 연결(CLI)로 실행한다 |
 | `scripts/add-connection.sh` | CLI 연결 `dbt_app`을 `~/.snowflake/connections.toml`에 만든다. 비밀번호는 숨김 입력 |
 | `scripts/run-native.sh` | 배포와 실행을 한 번에 한다. 임시 연결을 쓰고 비밀번호를 항상 새로 묻는다 |
 | `.gitlab-ci.yml` | 수동 실행 작업 하나. 배포와 실행을 한다 |
@@ -201,6 +205,7 @@ SHOW GRANTS TO ROLE DBT_APP;
 | 다이내믹 테이블, 증분 모델 | 둘 다 생성되었다 |
 | 다이내믹 테이블 갱신 모드 | `FULL`이다. 원천이 공유 DB라서 변경 추적을 켤 수 없어 증분 갱신이 안 된다 |
 | 실행 산출물 | 실행 롤이 `DBT_DEV.NATIVE`에 `dbt_project_output_stage_...` 스테이지를 소유한다 |
+| 태스크 실행 | `DBT_APP`이 소유한 태스크가 `EXECUTE DBT PROJECT ... build`를 수동 1회 실행해 성공했다(18초). 쿼리 이력의 실행 사용자는 `SYSTEM`, 롤은 `DBT_APP`이다. 사람이 `DBT_APP` 세션을 쓰지 않아도 Snowflake가 직접 실행한다 |
 
 ## 6. 알려진 이슈
 
@@ -211,13 +216,71 @@ SHOW GRANTS TO ROLE DBT_APP;
 ## 7. 확인하지 않은 것
 
 - 지원하는 dbt 버전 목록과 제한 사항, `--dbt-version`으로 올렸을 때의 동작, 배포 옵션이 기존 객체에 바뀌어 적용되는지.
-- `TASK` 스케줄, 환경 분리(`env.yml`), Slim CI, 실행 이력 모니터링 설정, 실패 알림.
+- `TASK`의 주기 실행(수동 1회만 확인했다), 환경 분리(`env.yml`), Slim CI, 실행 이력 모니터링 설정, 실패 알림.
 - CI 인증 방식. 지금은 비밀번호이고 PAT, OIDC도 검토 대상이다.
 - 증분 모델의 두 번째 실행 결과.
 - 위 "시험하지 않은 최소 권한 구성"에 적은 네 가지.
 - 일부 기능에 필요한 `live` 버전 객체 조건(`2026_06` 동작 변경 번들).
 
-## 8. 다음 단계
+## 8. Python 방식과 비교
+
+`snowflake-dbt`(dbt-core를 CI 파드에서 실행)와 이 프로젝트(dbt 프로젝트 객체를 Snowflake 안에서 실행)를 같은 모델로 비교했다. 목표는 "dbt 결과 객체를 사용자가 Snowsight에서 쿼리로 바꾸지 못하게 하고, 변경은 배포한 프로젝트를 통해서만 한다"는 통제다.
+
+### 가장 큰 차이
+
+dbt 코드가 Snowflake 안에서 **객체**로 존재하는지가 가장 큰 차이다.
+
+| | Python(dbt-core, CI 파드) | Snowflake CLI(dbt 프로젝트 객체) |
+|---|---|---|
+| Snowflake가 보는 것 | 서비스 계정이 보내는 평범한 SQL(`CREATE VIEW ...`) | `DBT PROJECT` 객체와 소유자, 버전, 실행 이력 |
+| 코드가 있는 곳 | GitLab과 CI 파드 | GitLab과 Snowflake 안(live 버전) |
+| 실행하는 곳 | CI 파드가 접속해서 SQL을 보낸다 | Snowflake 안에서 `EXECUTE DBT PROJECT`로 돈다 |
+| 실행 권한 통제 | 자격증명을 가진 쪽은 SQL을 무엇이든 보낼 수 있다 | 객체 권한(`USAGE`, `MONITOR`, `OWNERSHIP`)으로 나눈다 |
+| 변경 경로 | CI 파이프라인 | `snow dbt deploy`로 live 버전을 교체 |
+| 실행 시 CI 자격증명 | 매번 필요하다 | 배포할 때만 필요하다. 태스크로 돌리면 실행에는 불필요하다(시험 전) |
+| dbt 버전 | 이미지나 설치로 자유롭게 고른다 | Snowflake가 제공하는 버전. 기본값 `1.9.4` |
+
+### UI에 dbt 프로젝트가 하나만 보이는 이유
+
+Snowsight의 dbt 화면은 `DBT PROJECT` 객체만 보여 준다. Python 방식으로 만든 뷰와 테이블(`DBT_DEV.DEV`, `DBT_PROD.MART`)은 Snowflake에게 `DBT_APP`이 SQL로 만든 일반 객체다. 결과물은 둘 다 뷰와 테이블이지만 출처를 기록하는 방식이 다르다.
+
+Python 쪽 객체에서도 흔적은 남는다. 다이내믹 테이블 정의 끝에 `/* {"app": "dbt", "dbt_version": ..., "node_id": ...} */`라는 dbt 쿼리 주석이 붙어 있었다. dbt가 만들었다는 것은 알 수 있지만 어느 배포 버전에서 나왔는지는 Snowflake에서 알 수 없다.
+
+### 통제 관점
+
+두 방식 모두 결과 객체의 소유자는 `DBT_APP`이다. 사용자가 쿼리로 객체를 바꾸지 못하게 하는 기본 조건은 사람에게 `DBT_APP`을 주지 않는 것이고, 사람은 `DBT_USER`(조회 전용)만 갖는다. 이 부분은 두 방식이 같다.
+
+| 관점 | Python | CLI(네이티브) |
+|---|---|---|
+| 객체를 바꾸는 경로 | 파이프라인. 자격증명이 새면 같은 권한으로 SQL을 보낼 수 있다 | 배포(소유권)와 실행(`EXECUTE DBT PROJECT`) |
+| 코드와 결과의 연결 | 쿼리 주석뿐 | 객체의 버전과 실행 이력 |
+| 배포 계정의 권한 | 대응하는 개념이 없다 | 새 프로젝트 객체를 만들 수 없고 기존 객체의 소유권으로 내용만 교체하게 할 수 있다(시험함) |
+
+### 주의할 점
+
+- 네이티브라고 해서 사람이 SQL로 객체를 못 바꾸는 것이 자동으로 보장되지는 않는다. 결과 객체는 여전히 `DBT_APP` 소유이고, `DBT_APP`을 쓸 수 있는 쪽은 SQL로 바꿀 수 있다.
+- 문서에 따르면 `EXECUTE DBT PROJECT`는 프로필 롤의 권한으로 돌지만 호출한 사용자의 권한 범위 안으로 제한된다. 호출자도 해당 스키마 권한이 필요하므로, 사람이 실행만 하고 객체는 못 건드리게 하는 분리가 수동 실행으로는 깔끔하지 않을 수 있다.
+- 태스크는 소유자 롤 권한으로 돈다. 그래서 사람에게 `DBT_APP`을 주지 않고도 스케줄 실행이 가능한지가 핵심 시험 항목이다(`setup/03`, `04`).
+- 서비스 계정(`SVC_DBT`)이 비밀번호 인증이라 자격증명이 있으면 `DBT_APP`으로 임의 SQL을 보낼 수 있다. 이 위험은 두 방식이 같다. 접속 출처를 CI로 제한하는 네트워크 정책이나 PAT, OIDC가 대안이지만 시험하지 않았다.
+
+### 정리
+
+| 축 | 평가 |
+|---|---|
+| 감사와 추적 | 네이티브가 낫다. 객체, 버전, 실행 이력이 Snowflake 안에 남는다 |
+| 권한 분리 | 네이티브가 더 세밀하다(소유권과 실행 분리). 호출자 권한 제약이 있어 태스크 구성으로 검증해야 한다 |
+| 유연성 | Python이 높다. dbt 버전과 패키지를 자유롭게 고른다 |
+| 단순함 | Python이 낫다 |
+
+### 태스크 시험 계획
+
+1. 관리자가 `setup/03-native-task-grants.sql`을 Snowsight에서 실행한다.
+2. `snow sql -c dbt_app -f setup/04-native-task.sql`로 태스크를 만들고 한 번 수동 실행한다. 태스크는 만들면 정지 상태라서 스케줄은 켜지 않는다.
+3. 태스크 실행 이력에서 성공 여부와 실행 주체를 확인한다. 사람이 `DBT_APP`을 쓰지 않아도 실행되는지가 확인 대상이다.
+
+결과(2026-10-18): 태스크가 `SUCCEEDED`로 끝났고, 쿼리 이력에서 실행 사용자는 `SYSTEM`, 롤은 `DBT_APP`이었다. 이 구성이면 사람에게 `DBT_APP`을 주지 않고도 스케줄 실행이 가능하다. 태스크 생성도 `snow sql`(CLI)로 했고 Snowsight에서 쿼리로 바꾸지 않았다. 필요한 권한은 `DBT_APP`의 `CREATE TASK ON SCHEMA`와 `EXECUTE TASK ON ACCOUNT`였다. 실행 시 `NATIVE_TEST`의 뷰, 테이블, 증분 테이블이 갱신되었고 다이내믹 테이블은 갱신되지 않았다(정의가 그대로라서 dbt가 건드리지 않았다).
+
+## 9. 다음 단계
 
 1. 배포 시간을 줄인다. `--no-auto-compile`(배포 중 컴파일 약 14초)과 CLI가 미리 설치된 이미지(설치 약 19.5초)를 시험한다.
 2. 배포 롤과 실행 롤을 분리하고 `--no-auto-compile`을 시험한다.
