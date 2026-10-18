@@ -183,6 +183,8 @@ SHOW GRANTS TO ROLE DBT_APP;
 - **`resource_group`:** 같은 객체에 배포가 겹치지 않게 한 번에 하나만 돈다.
 - **`timeout`:** 15분이다.
 
+2026-10-18 확인: `.gitlab-ci.yml`이 바뀐 푸시에서 작업이 자동으로 실행되어 성공했다(66초). README만 바꾼 푸시에서는 자동 실행 없이 수동 실행 버튼만 만들어지는지 이어서 확인한다.
+
 | 항목 | 내용 |
 |---|---|
 | 이미지 | `python:3.12-slim`. 작업 안에서 `pip install snowflake-cli`로 CLI를 설치한다 |
