@@ -1,4 +1,4 @@
--- 뷰: 조회할 때마다 원천을 읽어 계산한다. 항상 최신이다.
+-- 뷰: 조회할 때마다 원천을 읽어 계산한다. 항상 최신이다. (CREATE SCHEMA 회수 후 CI 검증용 변경)
 {{ config(materialized='view') }}
 
 select
