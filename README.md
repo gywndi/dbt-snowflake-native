@@ -25,16 +25,33 @@ GitLab 저장소 ── snow dbt deploy ──▶ dbt 프로젝트 객체 (DBT_D
 | dbt 버전 | 기본값 `1.9.4` (어댑터 `1.9.2`) |
 | 원천 | `SNOWFLAKE_SAMPLE_DATA.TPCH_SF1` (공유 DB) |
 
-## 저장소 파일
+## 저장소 구조
+
+```
+snowflake-dbt-native/
+├── dbt/                          Snowflake로 올라가는 부분 (배포 대상은 이 디렉토리뿐)
+│   ├── dbt_project.yml
+│   ├── dbt_projects_profiles.yml
+│   └── models/
+├── setup/                        Snowflake 쪽 준비 SQL (배포 대상 아님)
+│   ├── 01-native-setup.sql
+│   └── 02-native-lockdown.sql
+├── scripts/                      로컬 실행 스크립트 (배포 대상 아님)
+│   ├── add-connection.sh
+│   └── run-native.sh
+├── .gitlab-ci.yml
+└── README.md
+```
 
 | 경로 | 내용 |
 |---|---|
-| `dbt_project.yml`, `models/` | 프로젝트와 모델. `snowflake-dbt`와 같은 모델이다 |
-| `dbt_projects_profiles.yml` | Snowflake 안에서 쓰는 프로필. `profiles.yml`보다 우선한다. 계정 정보와 비밀번호가 없다 |
+| `dbt/` | dbt 프로젝트. `snowflake-dbt`와 같은 모델이다. `snow dbt deploy --source dbt`가 이 디렉토리만 올린다 |
+| `dbt/dbt_projects_profiles.yml` | Snowflake 안에서 쓰는 프로필. `profiles.yml`보다 우선한다. 계정 정보와 비밀번호가 없다 |
 | `setup/01-native-setup.sql` | 프로젝트 객체를 둘 스키마와 최초 생성 권한 |
 | `setup/02-native-lockdown.sql` | 최초 배포 후 만들기 권한을 회수한다 |
-| `add-connection.sh` | CLI 연결 `dbt_app`을 `~/.snowflake/connections.toml`에 만든다. 비밀번호는 숨김 입력 |
-| `run-native.sh` | 배포와 실행을 한 번에 한다. 임시 연결을 쓰고 비밀번호를 항상 새로 묻는다 |
+| `scripts/add-connection.sh` | CLI 연결 `dbt_app`을 `~/.snowflake/connections.toml`에 만든다. 비밀번호는 숨김 입력 |
+| `scripts/run-native.sh` | 배포와 실행을 한 번에 한다. 임시 연결을 쓰고 비밀번호를 항상 새로 묻는다 |
+| `.gitlab-ci.yml` | 수동 실행 작업 하나. 배포와 실행을 한다 |
 
 ## 1. 준비
 
@@ -72,24 +89,24 @@ snow --version
 
 ```bash
 # 배포와 실행(build)을 한 번에 한다. 비밀번호를 물어본다
-./run-native.sh
+scripts/run-native.sh
 
 # 배포만 / 실행만
-./run-native.sh deploy
-./run-native.sh execute
+scripts/run-native.sh deploy
+scripts/run-native.sh execute
 ```
 
 ### 연결 설정을 만들어 실행
 
 ```bash
 # 연결 dbt_app을 만든다 (비밀번호 입력, 파일 권한 600)
-./add-connection.sh
+scripts/add-connection.sh
 
 # 연결 확인
 snow connection test -c dbt_app
 
-# 배포 (현재 디렉토리의 파일이 업로드됨)
-snow dbt deploy snowflake_dbt_native --source . --profiles-dir . --default-target dev -c dbt_app
+# 배포 (dbt/ 디렉토리의 파일이 업로드됨)
+snow dbt deploy snowflake_dbt_native --source dbt --profiles-dir dbt --default-target dev -c dbt_app
 
 # Snowflake 안에서 dbt build 실행
 snow dbt execute -c dbt_app snowflake_dbt_native build
@@ -148,7 +165,20 @@ SHOW GRANTS TO ROLE DBT_APP;
 
 실행 권한 모델도 알아둘 만하다. dbt는 프로필 `role`의 권한으로 실행되지만, 호출한 사용자가 가진 권한 범위 안으로 제한된다. 그래서 호출 계정과 프로필 롤이 모두 웨어하우스, 데이터베이스, 스키마, 모델이 참조하는 객체에 접근할 수 있어야 한다.
 
-## 4. 시험 결과
+## 4. GitLab CI
+
+`.gitlab-ci.yml`의 `snowflake_native` 작업은 `main`에서 수동으로만 돈다. 파이프라인 화면에서 실행 버튼을 눌러야 한다.
+
+| 항목 | 내용 |
+|---|---|
+| 이미지 | `python:3.12-slim`. 작업 안에서 `pip install snowflake-cli`로 CLI를 설치한다 |
+| 인증 | 프로젝트 CI 변수 `SNOWFLAKE_PASSWORD`(Masked, Protected 끔)를 CLI가 환경변수로 읽는다. 계정과 유저는 파일에 직접 쓴다 |
+| 배포 | `snow dbt deploy ... --source dbt --git-commit "$CI_COMMIT_SHA" --git-branch "$CI_COMMIT_REF_NAME"`. 어느 커밋이 배포됐는지 객체에 남는다 |
+| 실행 | `snow dbt execute <연결 옵션> snowflake_dbt_native build` |
+
+CI는 아직 한 번도 실행하지 않았다. 첫 실행 결과는 "확인하지 않은 것"에서 갱신한다.
+
+## 5. 시험 결과
 
 2026-10-18, 로컬에서 확인했다.
 
@@ -163,25 +193,24 @@ SHOW GRANTS TO ROLE DBT_APP;
 | 다이내믹 테이블 갱신 모드 | `FULL`이다. 원천이 공유 DB라서 변경 추적을 켤 수 없어 증분 갱신이 안 된다 |
 | 실행 산출물 | 실행 롤이 `DBT_DEV.NATIVE`에 `dbt_project_output_stage_...` 스테이지를 소유한다 |
 
-## 5. 알려진 이슈
+## 6. 알려진 이슈
 
 - **연결 옵션이 dbt 명령 뒤에 있으면 기본 연결을 찾는다.** `snow dbt execute`에서 옵션은 `build`보다 앞에 둔다.
 - **터미널에 남은 옛 비밀번호가 쓰인다.** 환경변수 `SNOWFLAKE_PASSWORD`가 이미 있으면 스크립트가 그 값을 그대로 쓴다. 비밀번호를 바꾼 뒤 `Incorrect username or password`가 나면 이것부터 의심한다. `run-native.sh`는 이제 항상 새로 묻는다.
-- **배포 디렉토리 전체가 올라간다.** 스크립트(`run-native.sh`, `add-connection.sh`)까지 업로드된다. 비밀번호는 파일에 없지만, 불필요한 파일을 올리지 않으려면 dbt 프로젝트를 하위 디렉토리로 옮기고 `--source`로 지정하는 구조가 낫다.
 - **공유 DB를 원천으로 쓰면 다이내믹 테이블이 항상 전체 갱신이다.** 직접 소유한 테이블이어야 증분 갱신이 가능하다.
 
-## 6. 확인하지 않은 것
+## 7. 확인하지 않은 것
 
 - 지원하는 dbt 버전 목록과 제한 사항, `--dbt-version`으로 올렸을 때의 동작, 배포 옵션이 기존 객체에 바뀌어 적용되는지.
 - `TASK` 스케줄, 환경 분리(`env.yml`), Slim CI, 실행 이력 모니터링 설정, 실패 알림.
-- GitLab CI에서의 실행과 인증 방식(PAT, OIDC). 지금은 비밀번호 인증이다.
+- GitLab CI 작업의 실제 실행 결과(`pip install snowflake-cli` 시간, 임시 연결이 컨테이너에서 동작하는지). 인증 방식은 PAT, OIDC도 검토 대상이다. 지금은 비밀번호 인증이다.
 - 증분 모델의 두 번째 실행 결과.
 - 위 "시험하지 않은 최소 권한 구성"에 적은 네 가지.
 - 일부 기능에 필요한 `live` 버전 객체 조건(`2026_06` 동작 변경 번들).
 
-## 7. 다음 단계
+## 8. 다음 단계
 
-1. `when: manual` GitLab CI 작업을 추가해 같은 배포와 실행을 자동화한다. 그 전에 프로젝트 CI 변수에 `SNOWFLAKE_PASSWORD`(Masked)를 등록한다.
+1. `snowflake_native` 수동 작업을 한 번 실행해서 CI에서의 동작과 소요 시간을 확인한다.
 2. 배포 롤과 실행 롤을 분리하고 `--no-auto-compile`을 시험한다.
 3. `TASK`로 주기 실행하고 모니터링을 켠다.
 4. 인증을 비밀번호에서 PAT나 OIDC, 키페어로 바꾼다.

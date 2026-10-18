@@ -1,6 +1,6 @@
 #!/bin/bash
 # Snowflake CLI 연결 설정(dbt_app)을 만든다. SVC_DBT의 비밀번호를 숨김 입력으로 받아 ~/.snowflake/connections.toml에 저장한다.
-# 사용법: ./add-connection.sh
+# 사용법: scripts/add-connection.sh
 set -euo pipefail
 
 FILE="$HOME/.snowflake/connections.toml"

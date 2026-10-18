@@ -1,11 +1,12 @@
 #!/bin/bash
 # Snowflake CLI로 dbt 프로젝트를 Snowflake 안에 배포하고 실행한다.
-# 사용법: ./run-native.sh            (배포 + build)
-#         ./run-native.sh deploy     (배포만)
-#         ./run-native.sh execute    (build만)
+# 사용법: scripts/run-native.sh            (배포 + build)
+#         scripts/run-native.sh deploy     (배포만)
+#         scripts/run-native.sh execute    (build만)
 set -euo pipefail
 
-cd "$(dirname "$0")"
+# 저장소 루트로 이동한다
+cd "$(dirname "$0")/.."
 
 ACCOUNT="<org>-<account>"
 CONN=(--temporary-connection --account "$ACCOUNT" --user SVC_DBT --role DBT_APP --warehouse DBT_WH --database DBT_DEV --schema NATIVE)
@@ -26,7 +27,7 @@ STEP="${1:-all}"
 
 if [[ "$STEP" == "all" || "$STEP" == "deploy" ]]; then
   echo "== 배포 =="
-  snow dbt deploy snowflake_dbt_native --source . --profiles-dir . --default-target dev "${CONN[@]}"
+  snow dbt deploy snowflake_dbt_native --source dbt --profiles-dir dbt --default-target dev "${CONN[@]}"
 fi
 
 if [[ "$STEP" == "all" || "$STEP" == "execute" ]]; then

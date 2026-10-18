@@ -18,7 +18,7 @@ snowflake_native:
       when: manual
   script:
     - pip install --quiet snowflake-cli
-    # 체크아웃된 GitLab 코드를 올린다. 어느 커밋이 배포됐는지 객체에 남긴다
-    - snow dbt deploy snowflake_dbt_native --source . --profiles-dir . --default-target dev --git-commit "$CI_COMMIT_SHA" --git-branch "$CI_COMMIT_REF_NAME" $SNOW_CONN
+    # 체크아웃된 GitLab 코드 중 dbt/ 디렉토리만 올린다. 어느 커밋이 배포됐는지 객체에 남긴다
+    - snow dbt deploy snowflake_dbt_native --source dbt --profiles-dir dbt --default-target dev --git-commit "$CI_COMMIT_SHA" --git-branch "$CI_COMMIT_REF_NAME" $SNOW_CONN
     # 연결 옵션은 dbt 명령(build)보다 앞에 둔다. 뒤의 인자는 전부 dbt로 넘어간다
     - snow dbt execute $SNOW_CONN snowflake_dbt_native build
