@@ -37,7 +37,10 @@ dbt-snowflake-native/
 │   ├── 01-native-setup.sql
 │   ├── 02-native-ownership.sql
 │   ├── 03-native-task-grants.sql
-│   └── 04-native-task.sql
+│   ├── 04-native-task.sql
+│   ├── 05-native-schema-precreate.sql
+│   ├── 06-native-revoke-create-schema.sql
+│   └── 07-native-negative-control.sql
 ├── scripts/                      로컬 실행 스크립트 (배포 대상 아님)
 │   ├── add-connection.sh
 │   └── run-native.sh
@@ -53,9 +56,12 @@ dbt-snowflake-native/
 | `setup/02-native-ownership.sql` | 관리자가 처음 배포한 프로젝트 객체의 소유권을 `DBT_APP`에 넘긴다 |
 | `setup/03-native-task-grants.sql` | 태스크 실행에 필요한 권한(`CREATE TASK`, `EXECUTE TASK`). 관리자가 한 번 실행한다 |
 | `setup/04-native-task.sql` | 프로젝트를 실행하는 태스크를 만든다. `DBT_APP` 연결(CLI)로 실행한다 |
+| `setup/05-native-schema-precreate.sql` | 모델 결과 스키마(`NATIVE_TEST`)를 관리자가 미리 만들고, `ALL`/`FUTURE SCHEMAS` grant로 `DBT_APP`에 객체 생성 권한을 준다 |
+| `setup/06-native-revoke-create-schema.sql` | `DBT_APP`의 데이터베이스 수준 `CREATE SCHEMA`를 회수한다. 05 적용 후에 실행한다 |
+| `setup/07-native-negative-control.sql` | 대조군. 결과 스키마를 지워 스키마가 없으면 `CREATE SCHEMA` 권한 에러로 실패하는지 확인한다. 확인 후 05로 원복한다 |
 | `scripts/add-connection.sh` | CLI 연결 `dbt_app`을 `~/.snowflake/connections.toml`에 만든다. 비밀번호는 숨김 입력 |
 | `scripts/run-native.sh` | 배포와 실행을 한 번에 한다. 임시 연결을 쓰고 비밀번호를 항상 새로 묻는다 |
-| `.gitlab-ci.yml` | 수동 실행 작업 하나. 배포와 실행을 한다 |
+| `.gitlab-ci.yml` | 작업 하나. `dbt/**`나 이 파일이 바뀐 `main` 푸시에서 자동으로 배포와 실행을 하고, 그 외에는 수동 실행 버튼만 보인다 |
 
 ## 1. 준비
 
@@ -72,6 +78,8 @@ GRANT USAGE ON SCHEMA DBT_DEV.NATIVE TO ROLE DBT_APP;
 ```
 
 `DBT_APP`에는 `CREATE DBT PROJECT` 권한을 주지 않는다. 프로젝트 객체는 관리자가 처음 한 번 만들고 소유권만 넘긴다. 그 절차는 "3. 권한"에 있다.
+
+모델 결과 스키마(`DBT_DEV.NATIVE_TEST`)도 관리자가 미리 만든다. `setup/05-native-schema-precreate.sql`로 스키마와 `FUTURE SCHEMAS` grant를 적용하고, `setup/06-native-revoke-create-schema.sql`로 `DBT_APP`의 `CREATE SCHEMA`를 회수한다. 이유와 검증은 "3. 권한"의 "결과 스키마는 미리 만든다"에 있다.
 
 ### 로컬
 
