@@ -1,5 +1,5 @@
 # Snowflake CLI로 dbt 프로젝트를 Snowflake 안에 배포하고 실행한다.
-# 수동 작업이라 파이프라인 화면에서 실행 버튼을 눌러야 돈다.
+# dbt/ 아래 파일이나 이 파일이 바뀐 main 푸시에서만 자동으로 돈다. 그 외에는 수동 실행 버튼만 보인다.
 # Snowflake 접속 비밀번호는 CI 변수 SNOWFLAKE_PASSWORD(Masked)로 받고, CLI가 환경변수로 읽는다.
 
 image: python:3.12-slim
@@ -11,9 +11,23 @@ variables:
   # snow 명령의 임시 연결 옵션 (설정 파일 없이 플래그로 연결한다)
   SNOW_CONN: "--temporary-connection --account <org>-<account> --user SVC_DBT --role DBT_APP --warehouse DBT_WH --database DBT_DEV --schema NATIVE"
 
+# MR 파이프라인은 만들지 않는다. 프로젝트 객체가 하나라서 MR 코드를 배포하면 live 버전이 덮어써진다
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 snowflake_native:
   stage: deploy
+  # 같은 객체에 배포가 겹치지 않게 한 번에 하나만 돈다
+  resource_group: snowflake_native
+  timeout: 15m
   rules:
+    # 배포 대상 파일이 바뀐 경우에만 자동 실행한다
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - dbt/**/*
+        - .gitlab-ci.yml
+    # 그 외 main 푸시에서는 필요할 때 손으로 실행한다
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
   script:

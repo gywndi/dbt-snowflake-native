@@ -171,7 +171,17 @@ SHOW GRANTS TO ROLE DBT_APP;
 
 ## 4. GitLab CI
 
-`.gitlab-ci.yml`의 `snowflake_native` 작업은 `main`에서 수동으로만 돈다. 파이프라인 화면에서 실행 버튼을 눌러야 한다.
+`.gitlab-ci.yml`의 `snowflake_native` 작업은 `main`에서 **배포 대상 파일이 바뀐 푸시일 때만 자동으로** 돈다.
+
+| 조건 | 동작 |
+|---|---|
+| `main` 푸시에서 `dbt/**` 또는 `.gitlab-ci.yml`이 바뀜 | 자동 실행 |
+| `main` 푸시에서 그 외 파일만 바뀜(README, `setup/`, `scripts/`) | 수동 실행 버튼만 보이고 파이프라인을 막지 않는다 |
+| 다른 브랜치, MR | 파이프라인을 만들지 않는다 |
+
+- **MR 파이프라인을 만들지 않는 이유:** 프로젝트 객체가 하나라서 MR 코드를 배포하면 live 버전이 덮어써진다.
+- **`resource_group`:** 같은 객체에 배포가 겹치지 않게 한 번에 하나만 돈다.
+- **`timeout`:** 15분이다.
 
 | 항목 | 내용 |
 |---|---|
